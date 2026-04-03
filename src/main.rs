@@ -19,14 +19,14 @@ enum Commands {
     Host {
         /// Specify the file path
         #[arg(long, value_name = "PATH")]
-        dir: Option<path::PathBuf>,
+        file: path::PathBuf,
     },
 
     /// Apply a users configuration
     Users {
         /// Specify the file path
         #[arg(long, value_name = "PATH")]
-        dir: Option<path::PathBuf>,
+        file: path::PathBuf,
     },
 }
 
@@ -35,8 +35,18 @@ fn main() {
 
     if let Some(command) = cli.command {
         match command {
-            Commands::Host { dir } => host::apply_host_config(&dir),
-            Commands::Users { dir } => users::apply_users_config(&dir),
+            Commands::Host { file } => {
+                if let Err(e) = host::apply_host_config(&file) {
+                    eprintln!("Error applying host config: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Commands::Users { file } => {
+                if let Err(e) = users::apply_users_config(&file) {
+                    eprintln!("Error applying users config: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
     }
 }
