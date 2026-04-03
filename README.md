@@ -37,37 +37,41 @@ SUBCOMMANDS:
            Usage: my-provisioner users --file /mnt/config/users.yaml
 ```
 
-## 4. Configuration Schemas (YAML)
+## 4. Configuration Schemas (TOML)
 
-### A. Host Configuration (`host.yaml`)
+### A. Host Configuration (`host.toml`)
 
 Defines the machine's identity on the network.
 
-```yaml
-hostname: "node-01.local"
+```toml
+# host.toml
+hostname = "node-01.local"
 
-ssh_host_keys:
-  ed25519:
-    private: |
-      -----BEGIN OPENSSH PRIVATE KEY-----
-      b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-      ...
-      -----END OPENSSH PRIVATE KEY-----
-    public: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... root@node-01"
-  # Optional: rsa, ecdsa, etc.
+[ssh_host_keys.ed25519]
+public = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... root@node-01"
+private = """
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW QyNTUxOQAAACBEABy+F7s1oE9q0LOM0k4l6z4s5aJ/gD+8tWv3vXm4uQAAAJDgY+jG4GPo
+...
+-----END OPENSSH PRIVATE KEY----- """
 ```
 
-### B. Users Configuration (`users.yaml`)
+### B. Users Configuration (`users.toml`)
 
 Defines the local accounts, their authentication methods, and permissions.
 
-```yaml
-users:
-  - name: "admin"
-    uid: 1000
-    groups: ["wheel", "docker"]
-    shell: "/bin/bash"
-    password_hash: "$6$rounds=65536$salt$hashedpassword..." # Optional
-    authorized_keys:
-      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... user@laptop"
+```toml
+# users.toml
+[[users]]
+name = "admin"
+uid = 1000
+groups = ["wheel", "docker"]
+shell = "/bin/bash"
+password_hash = "$6$rounds=65536$salt$hashedpassword..."
+authorized_keys = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... user@laptop" ]
+
+[[users]]
+name = "service_account"
+uid = 1001
+shell = "/sbin/nologin"
 ```
