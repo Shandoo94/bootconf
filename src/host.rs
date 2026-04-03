@@ -1,68 +1,89 @@
+#[cfg(not(test))]
 use nix::unistd::{gethostname, sethostname};
+
 use serde::Deserialize;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-const SSH_HOST_KEYS_DIR: &str = "/etc/ssh";
-const SSH_HOST_KEY_FILE_PUB: &str = "/etc/ssh/ssh_host_ed25519_key.pub";
-const SSH_HOST_KEY_FILE_PRIV: &str = "/etc/ssh/ssh_host_ed25519_key";
-const HOSTNAME_FILE: &str = "/etc/hostname";
+const DEFAULT_ETC: &str = "/etc";
 
-#[derive(Deserialize)]
-struct HostConfig {
-    hostname: String,
+#[derive(Deserialize, Debug)]
+pub struct HostConfig {
+    pub hostname: String,
     #[serde(rename = "ssh_host_keys")]
-    ssh_keys: Option<SshHostKeys>,
+    pub ssh_keys: Option<SshHostKeys>,
 }
 
-#[derive(Deserialize)]
-struct SshHostKeys {
-    ed25519: Option<SshKeyPair>,
+#[derive(Deserialize, Debug)]
+pub struct SshHostKeys {
+    pub ed25519: Option<SshKeyPair>,
 }
 
-#[derive(Deserialize)]
-struct SshKeyPair {
-    public: String,
-    private: String,
+#[derive(Deserialize, Debug)]
+pub struct SshKeyPair {
+    pub public: String,
+    pub private: String,
 }
 
-pub fn apply_host_config(file: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+pub fn apply_host_config(
+    file: &PathBuf,
+    root: Option<&Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let content = fs::read_to_string(file)?;
     let config: HostConfig = toml::from_str(&content)?;
 
-    apply_hostname(&config.hostname)?;
+    apply_hostname(&config.hostname, root)?;
 
     if let Some(ssh_keys) = config.ssh_keys {
         if let Some(ed25519) = ssh_keys.ed25519 {
-            apply_ssh_key(&ed25519.public, &ed25519.private)?;
+            apply_ssh_key(&ed25519.public, &ed25519.private, root)?;
         }
     }
 
     Ok(())
 }
 
-fn apply_hostname(hostname: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let current = gethostname()
-        .map(|h| h.to_string_lossy().into_owned())
-        .unwrap_or_default();
+pub fn apply_hostname(
+    hostname: &str,
+    root: Option<&Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(not(test))]
+    {
+        let current = gethostname()
+            .map(|h| h.to_string_lossy().into_owned())
+            .unwrap_or_default();
 
-    if current != hostname {
-        sethostname(hostname)?;
-        fs::write(HOSTNAME_FILE, hostname)?;
+        if current != hostname {
+            sethostname(hostname)?;
+        }
     }
+
+    let etc_path = root
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_ETC));
+    let hostname_path = etc_path.join("hostname");
+    fs::write(hostname_path, hostname)?;
 
     Ok(())
 }
 
-fn apply_ssh_key(public: &str, private: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let dir = PathBuf::from(SSH_HOST_KEYS_DIR);
-    if !dir.exists() {
-        fs::create_dir(&dir)?;
+pub fn apply_ssh_key(
+    public: &str,
+    private: &str,
+    root: Option<&Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let etc_path = root
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_ETC));
+    let ssh_dir = etc_path.join("ssh");
+
+    if !ssh_dir.exists() {
+        fs::create_dir(&ssh_dir)?;
     }
 
-    let pub_path = PathBuf::from(SSH_HOST_KEY_FILE_PUB);
-    let priv_path = PathBuf::from(SSH_HOST_KEY_FILE_PRIV);
+    let pub_path = ssh_dir.join("ssh_host_ed25519_key.pub");
+    let priv_path = ssh_dir.join("ssh_host_ed25519_key");
 
     if !pub_path.exists() {
         fs::write(&pub_path, public)?;

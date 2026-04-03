@@ -36,13 +36,13 @@ fn main() {
     if let Some(command) = cli.command {
         match command {
             Commands::Host { file } => {
-                if let Err(e) = host::apply_host_config(&file) {
+                if let Err(e) = host::apply_host_config(&file, None) {
                     eprintln!("Error applying host config: {}", e);
                     std::process::exit(1);
                 }
             }
             Commands::Users { file } => {
-                if let Err(e) = users::apply_users_config(&file) {
+                if let Err(e) = users::apply_users_config(&file, None) {
                     eprintln!("Error applying users config: {}", e);
                     std::process::exit(1);
                 }
