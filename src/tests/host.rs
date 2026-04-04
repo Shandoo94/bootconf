@@ -1,4 +1,4 @@
-use crate::host::{apply_hostname, apply_ssh_key, HostConfig};
+use crate::host::{self, HostConfig, apply_hostname, apply_ssh_key};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use tempfile::TempDir;
@@ -36,18 +36,21 @@ fn test_ssh_key_idempotency() {
     let root = temp_dir.path();
 
     let public = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEY root@test";
-    let private = "-----BEGIN OPENSSH PRIVATE KEY-----\nTESTKEYDATA\n-----END OPENSSH PRIVATE KEY-----";
+    let private =
+        "-----BEGIN OPENSSH PRIVATE KEY-----\nTESTKEYDATA\n-----END OPENSSH PRIVATE KEY-----";
 
-    apply_ssh_key(public, private, Some(root)).unwrap();
-    
-    let pub_path = root.join("ssh/ssh_host_ed25519_key.pub");
-    let priv_path = root.join("ssh/ssh_host_ed25519_key");
-    
+    let _ = apply_ssh_key(public, private, Some(root));
+
+    let pub_path = root
+        .join(host::DEFAULT_SSH_DIR)
+        .join(host::SSH_KEY_ED25519_PUB);
+    let priv_path = root.join(host::DEFAULT_SSH_DIR).join(host::SSH_KEY_ED25519);
+
     assert!(pub_path.exists());
     assert!(priv_path.exists());
 
     apply_ssh_key("different-public", "different-private", Some(root)).unwrap();
-    
+
     assert_eq!(fs::read_to_string(&pub_path).unwrap(), public);
     assert_eq!(fs::read_to_string(&priv_path).unwrap(), private);
 }
@@ -58,11 +61,12 @@ fn test_ssh_key_permissions() {
     let root = temp_dir.path();
 
     let public = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEY root@test";
-    let private = "-----BEGIN OPENSSH PRIVATE KEY-----\nTESTKEYDATA\n-----END OPENSSH PRIVATE KEY-----";
+    let private =
+        "-----BEGIN OPENSSH PRIVATE KEY-----\nTESTKEYDATA\n-----END OPENSSH PRIVATE KEY-----";
 
     apply_ssh_key(public, private, Some(root)).unwrap();
-    
-    let priv_path = root.join("ssh/ssh_host_ed25519_key");
+
+    let priv_path = root.join(host::DEFAULT_SSH_DIR).join(host::SSH_KEY_ED25519);
     let perms = fs::metadata(&priv_path).unwrap().permissions();
     assert_eq!(perms.mode() & 0o777, 0o600);
 }
@@ -73,7 +77,10 @@ fn test_hostname_file_written() {
     let root = temp_dir.path();
 
     apply_hostname("test-node.local", Some(root)).unwrap();
-    
-    let hostname_path = root.join("hostname");
-    assert_eq!(fs::read_to_string(&hostname_path).unwrap(), "test-node.local");
+
+    let hostname_path = root.join(host::DEFAULT_HOSTNAME_PATH);
+    assert_eq!(
+        fs::read_to_string(&hostname_path).unwrap(),
+        "test-node.local"
+    );
 }

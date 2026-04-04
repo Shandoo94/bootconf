@@ -33,19 +33,24 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
 
-    if let Some(command) = cli.command {
-        match command {
-            Commands::Host { file } => {
-                if let Err(e) = host::apply_host_config(&file, None) {
-                    eprintln!("Error applying host config: {}", e);
-                    std::process::exit(1);
-                }
+    // get command
+    let command = if let Some(command) = cli.command {
+        command
+    } else {
+        return;
+    };
+
+    match command {
+        Commands::Host { file } => {
+            if let Err(e) = host::apply_host_config(&file, None) {
+                eprintln!("Error applying host config: {}", e);
+                std::process::exit(1);
             }
-            Commands::Users { file } => {
-                if let Err(e) = users::apply_users_config(&file, None) {
-                    eprintln!("Error applying users config: {}", e);
-                    std::process::exit(1);
-                }
+        }
+        Commands::Users { file } => {
+            if let Err(e) = users::apply_users_config(&file, None) {
+                eprintln!("Error applying users config: {}", e);
+                std::process::exit(1);
             }
         }
     }

@@ -1,12 +1,16 @@
 #[cfg(not(test))]
-use nix::unistd::{gethostname, sethostname};
+use nix::unistd;
 
 use serde::Deserialize;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path;
 
-const DEFAULT_ETC: &str = "/etc";
+pub const DEFAULT_ROOT: &str = "/";
+pub const DEFAULT_HOSTNAME_PATH: &str = "etc/hostname";
+pub const DEFAULT_SSH_DIR: &str = "etc/ssh";
+pub const SSH_KEY_ED25519: &str = "ssh_host_ed25519_key";
+pub const SSH_KEY_ED25519_PUB: &str = "ssh_host_ed25519_key.pub";
 
 #[derive(Deserialize, Debug)]
 pub struct HostConfig {
@@ -27,8 +31,8 @@ pub struct SshKeyPair {
 }
 
 pub fn apply_host_config(
-    file: &PathBuf,
-    root: Option<&Path>,
+    file: &path::PathBuf,
+    root: Option<&path::Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let content = fs::read_to_string(file)?;
     let config: HostConfig = toml::from_str(&content)?;
@@ -46,23 +50,25 @@ pub fn apply_host_config(
 
 pub fn apply_hostname(
     hostname: &str,
-    root: Option<&Path>,
+    root: Option<&path::Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(test))]
     {
-        let current = gethostname()
+        let current = unistd::gethostname()
             .map(|h| h.to_string_lossy().into_owned())
             .unwrap_or_default();
 
         if current != hostname {
-            sethostname(hostname)?;
+            unistd::sethostname(hostname)?;
         }
     }
 
-    let etc_path = root
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_ETC));
-    let hostname_path = etc_path.join("hostname");
+    let hostname_path = root
+        .unwrap_or(path::Path::new(DEFAULT_ROOT))
+        .join(path::Path::new(DEFAULT_HOSTNAME_PATH));
+    if let Some(parent) = hostname_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     fs::write(hostname_path, hostname)?;
 
     Ok(())
@@ -71,19 +77,16 @@ pub fn apply_hostname(
 pub fn apply_ssh_key(
     public: &str,
     private: &str,
-    root: Option<&Path>,
+    root: Option<&path::Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let etc_path = root
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_ETC));
-    let ssh_dir = etc_path.join("ssh");
+    let ssh_dir = root
+        .unwrap_or(path::Path::new(DEFAULT_ROOT))
+        .join(path::Path::new(DEFAULT_SSH_DIR));
 
-    if !ssh_dir.exists() {
-        fs::create_dir(&ssh_dir)?;
-    }
+    fs::create_dir_all(&ssh_dir)?;
 
-    let pub_path = ssh_dir.join("ssh_host_ed25519_key.pub");
-    let priv_path = ssh_dir.join("ssh_host_ed25519_key");
+    let pub_path = ssh_dir.join(path::Path::new(SSH_KEY_ED25519_PUB));
+    let priv_path = ssh_dir.join(path::Path::new(SSH_KEY_ED25519));
 
     if !pub_path.exists() {
         fs::write(&pub_path, public)?;
@@ -98,4 +101,3 @@ pub fn apply_ssh_key(
 
     Ok(())
 }
-
