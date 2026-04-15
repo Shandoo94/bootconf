@@ -9,6 +9,8 @@ use std::path;
 pub const DEFAULT_ROOT: &str = "/";
 pub const DEFAULT_HOSTNAME_PATH: &str = "etc/hostname";
 pub const DEFAULT_SSH_DIR: &str = "etc/ssh";
+pub const DEFAULT_TIMEZONE_PATH: &str = "etc/localtime";
+pub const DEFAULT_ZONEINFO_DIR: &str = "/usr/share/zoneinfo";
 pub const SSH_KEY_ED25519: &str = "ssh_host_ed25519_key";
 pub const SSH_KEY_ED25519_PUB: &str = "ssh_host_ed25519_key.pub";
 pub const SSH_KEY_RSA: &str = "ssh_host_rsa_key";
@@ -19,8 +21,14 @@ pub const SSH_KEY_ECDSA_PUB: &str = "ssh_host_ecdsa_key.pub";
 #[derive(Deserialize, Debug)]
 pub struct HostConfig {
     pub hostname: String,
+    pub timezone: Option<Timezone>,
     #[serde(rename = "ssh_host_keys")]
     pub ssh_keys: Option<SshHostKeys>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Timezone {
+    pub zone: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -44,6 +52,10 @@ pub fn apply_host_config(
     let config: HostConfig = toml::from_str(&content)?;
 
     apply_hostname(&config.hostname, root)?;
+
+    if let Some(timezone) = config.timezone {
+        apply_timezone(&timezone.zone, root)?;
+    }
 
     if let Some(ssh_keys) = config.ssh_keys {
         if let Some(ed25519) = ssh_keys.ed25519 {
@@ -82,6 +94,58 @@ pub fn apply_hostname(
         fs::create_dir_all(parent)?;
     }
     fs::write(hostname_path, hostname)?;
+
+    Ok(())
+}
+
+pub fn apply_timezone(
+    zone: &str,
+    root: Option<&path::Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let zoneinfo_file = format!("{}/{}", DEFAULT_ZONEINFO_DIR, zone);
+    if !path::Path::new(&zoneinfo_file).exists() {
+        return Err(format!(
+            "Timezone file not found: {} (for zone: {})",
+            zoneinfo_file, zone
+        )
+        .into());
+    }
+
+    let localtime_path = root
+        .unwrap_or(path::Path::new(DEFAULT_ROOT))
+        .join(path::Path::new(DEFAULT_TIMEZONE_PATH));
+
+    if let Some(parent) = localtime_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    // Idempotency check
+    let needs_update = if localtime_path.exists() {
+        match fs::read_link(&localtime_path) {
+            Ok(current_target) => {
+                let current_target_str = current_target.to_string_lossy();
+                current_target_str != zoneinfo_file
+            }
+            Err(_) => {
+                // Not a symlink, needs update
+                true
+            }
+        }
+    } else {
+        // Doesn't exist, needs creation
+        true
+    };
+
+    if needs_update {
+        // Remove existing file/symlink if present
+        if localtime_path.exists() {
+            fs::remove_file(&localtime_path)?;
+        }
+
+        // Create the symlink
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&zoneinfo_file, &localtime_path)?;
+    }
 
     Ok(())
 }

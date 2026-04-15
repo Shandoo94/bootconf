@@ -5,6 +5,7 @@
 **Scope:**
 - Parsing structured YAML configuration files.
 - Idempotently configuring the system hostname.
+- Idempotently configuring the system timezone.
 - Idempotently provisioning SSH host keys.
 - Idempotently managing local user accounts, password hashes, and SSH authorized keys. 
 
@@ -46,6 +47,9 @@ Defines the machine's identity on the network.
 ```toml
 # host.toml
 hostname = "node-01.local"
+
+[timezone]
+zone = "America/New_York"
 
 [ssh_host_keys.ed25519]
 public = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... root@node-01"
