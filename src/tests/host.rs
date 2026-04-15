@@ -39,7 +39,7 @@ fn test_ssh_key_idempotency() {
     let private =
         "-----BEGIN OPENSSH PRIVATE KEY-----\nTESTKEYDATA\n-----END OPENSSH PRIVATE KEY-----";
 
-    let _ = apply_ssh_key(public, private, Some(root));
+    let _ = apply_ssh_key(public, private, "ed25519", Some(root));
 
     let pub_path = root
         .join(host::DEFAULT_SSH_DIR)
@@ -49,7 +49,13 @@ fn test_ssh_key_idempotency() {
     assert!(pub_path.exists());
     assert!(priv_path.exists());
 
-    apply_ssh_key("different-public", "different-private", Some(root)).unwrap();
+    apply_ssh_key(
+        "different-public",
+        "different-private",
+        "ed25519",
+        Some(root),
+    )
+    .unwrap();
 
     assert_eq!(fs::read_to_string(&pub_path).unwrap(), public);
     assert_eq!(fs::read_to_string(&priv_path).unwrap(), private);
@@ -64,7 +70,7 @@ fn test_ssh_key_permissions() {
     let private =
         "-----BEGIN OPENSSH PRIVATE KEY-----\nTESTKEYDATA\n-----END OPENSSH PRIVATE KEY-----";
 
-    apply_ssh_key(public, private, Some(root)).unwrap();
+    apply_ssh_key(public, private, "ed25519", Some(root)).unwrap();
 
     let priv_path = root.join(host::DEFAULT_SSH_DIR).join(host::SSH_KEY_ED25519);
     let perms = fs::metadata(&priv_path).unwrap().permissions();

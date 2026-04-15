@@ -11,6 +11,10 @@ pub const DEFAULT_HOSTNAME_PATH: &str = "etc/hostname";
 pub const DEFAULT_SSH_DIR: &str = "etc/ssh";
 pub const SSH_KEY_ED25519: &str = "ssh_host_ed25519_key";
 pub const SSH_KEY_ED25519_PUB: &str = "ssh_host_ed25519_key.pub";
+pub const SSH_KEY_RSA: &str = "ssh_host_rsa_key";
+pub const SSH_KEY_RSA_PUB: &str = "ssh_host_rsa_key.pub";
+pub const SSH_KEY_ECDSA: &str = "ssh_host_ecdsa_key";
+pub const SSH_KEY_ECDSA_PUB: &str = "ssh_host_ecdsa_key.pub";
 
 #[derive(Deserialize, Debug)]
 pub struct HostConfig {
@@ -22,6 +26,8 @@ pub struct HostConfig {
 #[derive(Deserialize, Debug)]
 pub struct SshHostKeys {
     pub ed25519: Option<SshKeyPair>,
+    pub rsa: Option<SshKeyPair>,
+    pub ecdsa: Option<SshKeyPair>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -41,7 +47,13 @@ pub fn apply_host_config(
 
     if let Some(ssh_keys) = config.ssh_keys {
         if let Some(ed25519) = ssh_keys.ed25519 {
-            apply_ssh_key(&ed25519.public, &ed25519.private, root)?;
+            apply_ssh_key(&ed25519.public, &ed25519.private, "ed25519", root)?;
+        }
+        if let Some(rsa) = ssh_keys.rsa {
+            apply_ssh_key(&rsa.public, &rsa.private, "rsa", root)?;
+        }
+        if let Some(ecdsa) = ssh_keys.ecdsa {
+            apply_ssh_key(&ecdsa.public, &ecdsa.private, "ecdsa", root)?;
         }
     }
 
@@ -77,6 +89,7 @@ pub fn apply_hostname(
 pub fn apply_ssh_key(
     public: &str,
     private: &str,
+    key_type: &str,
     root: Option<&path::Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ssh_dir = root
@@ -85,8 +98,15 @@ pub fn apply_ssh_key(
 
     fs::create_dir_all(&ssh_dir)?;
 
-    let pub_path = ssh_dir.join(path::Path::new(SSH_KEY_ED25519_PUB));
-    let priv_path = ssh_dir.join(path::Path::new(SSH_KEY_ED25519));
+    let (pub_filename, priv_filename) = match key_type {
+        "ed25519" => (SSH_KEY_ED25519_PUB, SSH_KEY_ED25519),
+        "rsa" => (SSH_KEY_RSA_PUB, SSH_KEY_RSA),
+        "ecdsa" => (SSH_KEY_ECDSA_PUB, SSH_KEY_ECDSA),
+        _ => return Err("Unknown SSH key type".into()),
+    };
+
+    let pub_path = ssh_dir.join(path::Path::new(pub_filename));
+    let priv_path = ssh_dir.join(path::Path::new(priv_filename));
 
     if !pub_path.exists() {
         fs::write(&pub_path, public)?;
