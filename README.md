@@ -71,7 +71,7 @@ name = "admin"
 uid = 1000
 groups = ["wheel", "docker"]
 shell = "/bin/bash"
-password_hash = "$6$rounds=65536$salt$hashedpassword..."
+password = "$6$rounds=65536$salt$hashedpassword..."
 authorized_keys = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... user@laptop" ]
 
 [[users]]
