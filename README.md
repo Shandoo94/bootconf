@@ -3,7 +3,7 @@
 **Purpose:** To provide a simple, lightweight and init-agnostic binary that applies declarative machine state (identity and access) to a transient root filesystem (`/etc`) on every boot. The configuration files are supposed to be on a separate partition which is mounted during boot. The intended use case is immutable operating systems based on tools such as `bootc` with `/var` mutable and `/etc` as transient.
 
 **Scope:**
-- Parsing structured YAML configuration files.
+- Parsing structured TOML configuration files.
 - Idempotently configuring the system hostname.
 - Idempotently configuring the system timezone.
 - Idempotently provisioning SSH host keys.
@@ -20,7 +20,7 @@ The tool is designed to run extremely early in the boot process (e.g., via an Op
 
 1. **Pre-requisite:** The OS boot process mounts the `CONFIG` partition (e.g., to `/mnt/config`).
 2. **Execution:** The wrapper script invokes the Rust binary: `bootconf apply --dir /mnt/config`.
-3. **Processing:** The binary reads the YAML files, compares the desired state against the live transient `/etc`, and writes only the necessary changes.
+3. **Processing:** The binary reads the TOML files, compares the desired state against the live transient `/etc`, and writes only the necessary changes.
 4. **Cleanup:** The binary exits with code `0` (success) or `>0` (failure). The wrapper script unmounts `/mnt/config` and boot continues.
 
 ## 3. Command Line Interface (CLI) Design
