@@ -48,8 +48,8 @@ Defines the machine's identity on the network.
 # host.toml
 hostname = "node-01.local"
 
-[timezone]
-zone = "America/New_York"
+[locale]
+timezone = "America/New_York"
 
 [ssh_host_keys.ed25519]
 public = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... root@node-01"

@@ -96,13 +96,13 @@ fn test_parse_timezone_config() {
     let toml_content = r#"
 hostname = "test-node.local"
 
-[timezone]
-zone = "America/New_York"
+[locale]
+timezone = "America/New_York"
 "#;
     let config: HostConfig = toml::from_str(toml_content).unwrap();
     assert_eq!(config.hostname, "test-node.local");
-    assert!(config.timezone.is_some());
-    assert_eq!(config.timezone.unwrap().zone, "America/New_York");
+    assert!(config.locale.is_some());
+    assert_eq!(config.locale.unwrap().timezone, "America/New_York");
 }
 
 #[test]

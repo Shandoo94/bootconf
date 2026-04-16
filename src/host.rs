@@ -21,14 +21,14 @@ pub const SSH_KEY_ECDSA_PUB: &str = "ssh_host_ecdsa_key.pub";
 #[derive(Deserialize, Debug)]
 pub struct HostConfig {
     pub hostname: String,
-    pub timezone: Option<Timezone>,
+    pub locale: Option<Locale>,
     #[serde(rename = "ssh_host_keys")]
     pub ssh_keys: Option<SshHostKeys>,
 }
 
 #[derive(Deserialize, Debug)]
-pub struct Timezone {
-    pub zone: String,
+pub struct Locale {
+    pub timezone: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -53,8 +53,8 @@ pub fn apply_host_config(
 
     apply_hostname(&config.hostname, root)?;
 
-    if let Some(timezone) = config.timezone {
-        apply_timezone(&timezone.zone, root)?;
+    if let Some(locale) = config.locale {
+        apply_timezone(&locale.timezone, root)?;
     }
 
     if let Some(ssh_keys) = config.ssh_keys {
