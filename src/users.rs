@@ -147,7 +147,11 @@ pub fn ensure_authorized_keys(
 
     #[cfg(not(test))]
     if user.home.is_some() {
-        unistd::chown(parent, Some(unistd::Uid::from_raw(user.uid)), None)?;
+        unistd::chown(
+            parent,
+            Some(unistd::Uid::from_raw(user.uid)),
+            Some(unistd::Gid::from_raw(user.uid)),
+        )?;
     }
 
     let existing = read_key_set(&target_path);
@@ -173,7 +177,11 @@ pub fn ensure_authorized_keys(
 
         #[cfg(not(test))]
         if user.home.is_some() {
-            unistd::chown(&target_path, Some(unistd::Uid::from_raw(user.uid)), None)?;
+            unistd::chown(
+                &target_path,
+                Some(unistd::Uid::from_raw(user.uid)),
+                Some(unistd::Gid::from_raw(user.uid)),
+            )?;
         }
     }
 
