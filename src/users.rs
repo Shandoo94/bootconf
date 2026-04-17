@@ -1,12 +1,15 @@
 use nix::unistd;
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path;
 use std::process;
 
 pub const DEFAULT_ROOT: &str = "/";
 pub const SSH_DIR: &str = ".ssh";
 pub const AUTHORIZED_KEYS: &str = "authorized_keys";
+pub const AUTHORIZED_KEYS_DIR: &str = "etc/ssh/authorized_keys.d";
 pub const SSH_DIR_MODE: u32 = 0o700;
 pub const AUTHORIZED_KEYS_MODE: u32 = 0o600;
 
@@ -50,6 +53,8 @@ pub fn apply_user(
         Some(_) => modify_user(user, root_path)?,
         None => create_user(user, root_path)?,
     };
+
+    ensure_authorized_keys(user, root_path)?;
 
     Ok(())
 }
@@ -103,6 +108,74 @@ fn set_shell_home_group_args(
     if let Some(groups) = &user.groups {
         cmd.arg("-G").arg(groups.join(","));
     };
+
+    Ok(())
+}
+
+fn read_key_set(path: &path::Path) -> HashSet<String> {
+    fs::read_to_string(path)
+        .map(|content| {
+            content
+                .lines()
+                .filter(|l| !l.is_empty())
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn ensure_authorized_keys(
+    user: &User,
+    root: &path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let keys = match &user.authorized_keys {
+        Some(keys) if !keys.is_empty() => keys,
+        _ => return Ok(()),
+    };
+
+    let target_path = match &user.home {
+        Some(home) => root
+            .join(home.trim_start_matches('/'))
+            .join(SSH_DIR)
+            .join(AUTHORIZED_KEYS),
+        None => root.join(AUTHORIZED_KEYS_DIR).join(&user.name),
+    };
+
+    let parent = target_path.parent().unwrap();
+    fs::create_dir_all(parent)?;
+    fs::set_permissions(parent, fs::Permissions::from_mode(SSH_DIR_MODE))?;
+
+    #[cfg(not(test))]
+    if user.home.is_some() {
+        unistd::chown(parent, Some(unistd::Uid::from_raw(user.uid)), None)?;
+    }
+
+    let existing = read_key_set(&target_path);
+    let new_keys: Vec<&String> = keys.iter().filter(|k| !existing.contains(*k)).collect();
+
+    if !new_keys.is_empty() {
+        let mut content: String = fs::read_to_string(&target_path).unwrap_or_default();
+
+        if !content.is_empty() && !content.ends_with('\n') {
+            content.push('\n');
+        }
+
+        for key in &new_keys {
+            content.push_str(key);
+            content.push('\n');
+        }
+
+        fs::write(&target_path, &content)?;
+        fs::set_permissions(
+            &target_path,
+            fs::Permissions::from_mode(AUTHORIZED_KEYS_MODE),
+        )?;
+
+        #[cfg(not(test))]
+        if user.home.is_some() {
+            unistd::chown(&target_path, Some(unistd::Uid::from_raw(user.uid)), None)?;
+        }
+    }
 
     Ok(())
 }
