@@ -51,11 +51,9 @@ pub fn apply_user(
     let root_path = root.unwrap_or(path::Path::new(DEFAULT_ROOT));
 
     match unistd::User::from_name(&user.name).ok().flatten() {
-        Some(existing_user) => modify_user(user, &existing_user, root_path),
+        Some(_) => modify_user(user, root_path)?,
         None => create_user(user, root_path)?,
     };
-
-    ensure_home_directory(user, root_path);
 
     Ok(())
 }
@@ -63,24 +61,13 @@ pub fn apply_user(
 pub fn create_user(user: &User, root: &path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = process::Command::new("useradd");
 
-    cmd.arg("-m")
-        .arg("-U")
+    cmd.arg("-U")
         .arg("-u")
-        .arg(user.uid.to_string())
+        .arg(&user.uid.to_string())
         .arg("R")
-        .arg(root.to_string_lossy().to_string());
+        .arg(&root.to_string_lossy().to_string());
 
-    if let Some(shell) = &user.shell {
-        cmd.arg("-s").arg(shell);
-    };
-
-    if let Some(home_dir) = &user.home {
-        cmd.arg("-d").arg(root.join(home_dir));
-    };
-
-    if let Some(groups) = &user.groups {
-        cmd.arg("-G").arg(groups.join(","));
-    };
+    set_user_args(user, &mut cmd)?;
 
     cmd.arg(&user.name);
 
@@ -89,6 +76,37 @@ pub fn create_user(user: &User, root: &path::Path) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
-pub fn modify_user(user: &User, existing_user: &unistd::User, root: &path::Path) {}
+pub fn modify_user(user: &User, root: &path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    let mut cmd = process::Command::new("usermod");
 
-pub fn ensure_home_directory(user: &User, root: &path::Path) {}
+    if let Some(_) = &user.groups {
+        cmd.arg("-a");
+    };
+
+    set_user_args(user, &mut cmd)?;
+
+    cmd.arg(&user.name);
+
+    let _ = cmd.status();
+
+    Ok(())
+}
+
+fn set_user_args(
+    user: &User,
+    cmd: &mut process::Command,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(shell) = &user.shell {
+        cmd.arg("-s").arg(shell);
+    };
+
+    if let Some(home_dir) = &user.home {
+        cmd.arg("-m").arg("-d").arg(home_dir);
+    };
+
+    if let Some(groups) = &user.groups {
+        cmd.arg("-G").arg(groups.join(","));
+    };
+
+    Ok(())
+}
