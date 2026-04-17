@@ -5,12 +5,8 @@ use std::path;
 use std::process;
 
 pub const DEFAULT_ROOT: &str = "/";
-pub const PASSWD_PATH: &str = "etc/passwd";
-pub const SHADOW_PATH: &str = "etc/shadow";
-pub const GROUP_PATH: &str = "etc/group";
 pub const SSH_DIR: &str = ".ssh";
 pub const AUTHORIZED_KEYS: &str = "authorized_keys";
-pub const HOME_DIR_MODE: u32 = 0o700;
 pub const SSH_DIR_MODE: u32 = 0o700;
 pub const AUTHORIZED_KEYS_MODE: u32 = 0o600;
 
@@ -67,7 +63,7 @@ pub fn create_user(user: &User, root: &path::Path) -> Result<(), Box<dyn std::er
         .arg("R")
         .arg(&root.to_string_lossy().to_string());
 
-    set_user_args(user, &mut cmd)?;
+    set_shell_home_group_args(user, &mut cmd)?;
 
     cmd.arg(&user.name);
 
@@ -83,7 +79,7 @@ pub fn modify_user(user: &User, root: &path::Path) -> Result<(), Box<dyn std::er
         cmd.arg("-a");
     };
 
-    set_user_args(user, &mut cmd)?;
+    set_shell_home_group_args(user, &mut cmd)?;
 
     cmd.arg(&user.name);
 
@@ -92,7 +88,7 @@ pub fn modify_user(user: &User, root: &path::Path) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
-fn set_user_args(
+fn set_shell_home_group_args(
     user: &User,
     cmd: &mut process::Command,
 ) -> Result<(), Box<dyn std::error::Error>> {
