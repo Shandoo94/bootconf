@@ -65,7 +65,7 @@ pub fn create_user(user: &User, root: &path::Path) -> Result<(), Box<dyn std::er
     cmd.arg("-U")
         .arg("-u")
         .arg(&user.uid.to_string())
-        .arg("R")
+        .arg("-R")
         .arg(&root.to_string_lossy().to_string());
 
     set_shell_home_group_args(user, &mut cmd)?;
