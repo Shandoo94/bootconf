@@ -2,6 +2,7 @@ use nix::unistd;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path;
 use std::process;
@@ -50,7 +51,7 @@ pub fn apply_user(
     let root_path = root.unwrap_or(path::Path::new(DEFAULT_ROOT));
 
     match unistd::User::from_name(&user.name).ok().flatten() {
-        Some(_) => modify_user(user, root_path)?,
+        Some(existing) => modify_user(user, &existing, root_path)?,
         None => create_user(user, root_path)?,
     };
 
@@ -74,10 +75,18 @@ pub fn create_user(user: &User, root: &path::Path) -> Result<(), Box<dyn std::er
 
     let _ = cmd.status();
 
+    if let Some(hash) = &user.password {
+        set_passwd(&user.name, &hash, &root)?;
+    };
+
     Ok(())
 }
 
-pub fn modify_user(user: &User, root: &path::Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn modify_user(
+    user: &User,
+    existing: &unistd::User,
+    root: &path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = process::Command::new("usermod");
 
     if let Some(_) = &user.groups {
@@ -89,6 +98,12 @@ pub fn modify_user(user: &User, root: &path::Path) -> Result<(), Box<dyn std::er
     cmd.arg(&user.name);
 
     let _ = cmd.status();
+
+    if let Some(passwh_hash) = &user.password
+        && *passwh_hash != existing.passwd.to_string_lossy()
+    {
+        set_passwd(&user.name, &passwh_hash, root)?;
+    };
 
     Ok(())
 }
@@ -184,6 +199,28 @@ pub fn ensure_authorized_keys(
             )?;
         }
     }
+
+    Ok(())
+}
+
+fn set_passwd(
+    name: &String,
+    hash: &String,
+    root: &path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut cmd = process::Command::new("chpasswd");
+
+    cmd.arg("-e")
+        .arg("-R")
+        .arg(root.to_string_lossy().to_string())
+        .stdin(process::Stdio::piped());
+
+    let mut child = cmd.spawn()?;
+    let mut stdin = child.stdin.take().ok_or("Failed to open stdin")?;
+    write!(stdin, "{}:{}", name, hash)?;
+    drop(stdin);
+
+    child.wait()?;
 
     Ok(())
 }
