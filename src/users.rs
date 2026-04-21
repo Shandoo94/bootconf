@@ -7,7 +7,6 @@ use std::os::unix::fs::PermissionsExt;
 use std::path;
 use std::process;
 
-pub const DEFAULT_ROOT: &str = "/";
 pub const SSH_DIR: &str = ".ssh";
 pub const AUTHORIZED_KEYS: &str = "authorized_keys";
 pub const AUTHORIZED_KEYS_DIR: &str = "etc/ssh/authorized_keys.d";
@@ -30,30 +29,22 @@ pub struct User {
     pub authorized_keys: Option<Vec<String>>,
 }
 
-pub fn apply_users_config(
-    file: &path::PathBuf,
-    root: Option<&path::Path>,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn apply_users_config(file: &path::PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let content = fs::read_to_string(file)?;
     let config: UsersConfig = toml::from_str(&content)?;
 
     for user in &config.users {
-        apply_user(user, root)?;
+        apply_user(user)?;
     }
 
     Ok(())
 }
 
-pub fn apply_user(
-    user: &User,
-    root: Option<&path::Path>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let root_path = root.unwrap_or(path::Path::new(DEFAULT_ROOT));
-
+pub fn apply_user(user: &User) -> Result<(), Box<dyn std::error::Error>> {
     let existing = match unistd::User::from_name(&user.name).ok().flatten() {
         Some(u) => u,
         None => {
-            create_user(user, root_path)?;
+            create_user(user)?;
             unistd::User::from_name(&user.name)
                 .ok()
                 .flatten()
@@ -61,22 +52,20 @@ pub fn apply_user(
         }
     };
 
-    ensure_home(user, &existing, root_path)?;
-    ensure_shell(user, &existing, root_path)?;
-    ensure_groups(user, root_path)?;
-    ensure_password(user, &existing, root_path)?;
-    ensure_authorized_keys(user, root_path)?;
+    ensure_home(user, &existing)?;
+    ensure_shell(user, &existing)?;
+    ensure_groups(user)?;
+    ensure_password(user, &existing)?;
+    ensure_authorized_keys(user)?;
 
     Ok(())
 }
 
-pub fn create_user(user: &User, root: &path::Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn create_user(user: &User) -> Result<(), Box<dyn std::error::Error>> {
     let status = process::Command::new("useradd")
         .arg("-U")
         .arg("-u")
         .arg(&user.uid.to_string())
-        .arg("-R")
-        .arg(&root.to_string_lossy().to_string())
         .arg(&user.name)
         .status()?;
 
@@ -87,11 +76,7 @@ pub fn create_user(user: &User, root: &path::Path) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
-fn ensure_home(
-    user: &User,
-    existing: &unistd::User,
-    root: &path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn ensure_home(user: &User, existing: &unistd::User) -> Result<(), Box<dyn std::error::Error>> {
     let desired = match &user.home {
         Some(home) => home,
         None => return Ok(()),
@@ -105,8 +90,6 @@ fn ensure_home(
         .arg("-d")
         .arg(desired)
         .arg("-m")
-        .arg("-R")
-        .arg(&root.to_string_lossy().to_string())
         .arg(&user.name)
         .status()?;
 
@@ -117,10 +100,9 @@ fn ensure_home(
     Ok(())
 }
 
-fn ensure_shell(
+pub fn ensure_shell(
     user: &User,
     existing: &unistd::User,
-    root: &path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let desired = match &user.shell {
         Some(shell) => shell,
@@ -134,8 +116,6 @@ fn ensure_shell(
     let status = process::Command::new("usermod")
         .arg("-s")
         .arg(desired)
-        .arg("-R")
-        .arg(&root.to_string_lossy().to_string())
         .arg(&user.name)
         .status()?;
 
@@ -146,10 +126,7 @@ fn ensure_shell(
     Ok(())
 }
 
-fn ensure_groups(
-    user: &User,
-    root: &path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn ensure_groups(user: &User) -> Result<(), Box<dyn std::error::Error>> {
     let desired_groups = match &user.groups {
         Some(groups) => groups,
         None => return Ok(()),
@@ -169,25 +146,24 @@ fn ensure_groups(
             .arg("-a")
             .arg("-G")
             .arg(group_name)
-            .arg("-R")
-            .arg(&root.to_string_lossy().to_string())
             .arg(&user.name)
             .status()?;
 
         if !status.success() {
-            return Err(
-                format!("usermod failed adding '{}' to group '{}'", user.name, group_name).into(),
-            );
+            return Err(format!(
+                "usermod failed adding '{}' to group '{}'",
+                user.name, group_name
+            )
+            .into());
         }
     }
 
     Ok(())
 }
 
-fn ensure_password(
+pub fn ensure_password(
     user: &User,
     existing: &unistd::User,
-    root: &path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let desired = match &user.password {
         Some(hash) => hash,
@@ -198,12 +174,31 @@ fn ensure_password(
         return Ok(());
     }
 
-    set_passwd(&user.name, desired, root)?;
+    if existing.passwd.to_string_lossy() == "x" {
+        if let Some(current_hash) = read_shadow_hash(&user.name)? {
+            if *desired == current_hash {
+                return Ok(());
+            }
+        }
+    }
+
+    set_passwd(&user.name, desired)?;
 
     Ok(())
 }
 
-fn read_key_set(path: &path::Path) -> HashSet<String> {
+fn read_shadow_hash(name: &str) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let content = fs::read_to_string("/etc/shadow")?;
+    for line in content.lines() {
+        let mut parts = line.splitn(3, ':');
+        if parts.next() == Some(name) {
+            return Ok(parts.next().map(String::from));
+        }
+    }
+    Ok(None)
+}
+
+pub fn read_key_set(path: &path::Path) -> HashSet<String> {
     fs::read_to_string(path)
         .map(|content| {
             content
@@ -215,21 +210,19 @@ fn read_key_set(path: &path::Path) -> HashSet<String> {
         .unwrap_or_default()
 }
 
-pub fn ensure_authorized_keys(
-    user: &User,
-    root: &path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn ensure_authorized_keys(user: &User) -> Result<(), Box<dyn std::error::Error>> {
     let keys = match &user.authorized_keys {
         Some(keys) if !keys.is_empty() => keys,
         _ => return Ok(()),
     };
 
     let target_path = match &user.home {
-        Some(home) => root
-            .join(home.trim_start_matches('/'))
+        Some(home) => path::PathBuf::from(home)
             .join(SSH_DIR)
             .join(AUTHORIZED_KEYS),
-        None => root.join(AUTHORIZED_KEYS_DIR).join(&user.name),
+        None => path::Path::new("/")
+            .join(AUTHORIZED_KEYS_DIR)
+            .join(&user.name),
     };
 
     let parent = target_path.parent().unwrap();
@@ -277,17 +270,10 @@ pub fn ensure_authorized_keys(
     Ok(())
 }
 
-fn set_passwd(
-    name: &str,
-    hash: &str,
-    root: &path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn set_passwd(name: &str, hash: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = process::Command::new("chpasswd");
 
-    cmd.arg("-e")
-        .arg("-R")
-        .arg(root.to_string_lossy().to_string())
-        .stdin(process::Stdio::piped());
+    cmd.arg("-e").stdin(process::Stdio::piped());
 
     let mut child = cmd.spawn()?;
     let mut stdin = child.stdin.take().ok_or("Failed to open stdin")?;

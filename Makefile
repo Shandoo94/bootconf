@@ -12,7 +12,7 @@ PODMAN   := podman run --rm \
             $(IMAGE)
 
 test:
-	$(PODMAN) cargo test
+	$(PODMAN) cargo test -- --test-threads=1
 
 build:
 	$(PODMAN) cargo build

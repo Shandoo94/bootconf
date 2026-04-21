@@ -48,7 +48,7 @@ fn main() {
             }
         }
         Commands::Users { file } => {
-            if let Err(e) = users::apply_users_config(&file, None) {
+            if let Err(e) = users::apply_users_config(&file) {
                 eprintln!("Error applying users config: {}", e);
                 std::process::exit(1);
             }
