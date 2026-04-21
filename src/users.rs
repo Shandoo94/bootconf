@@ -50,79 +50,155 @@ pub fn apply_user(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let root_path = root.unwrap_or(path::Path::new(DEFAULT_ROOT));
 
-    match unistd::User::from_name(&user.name).ok().flatten() {
-        Some(existing) => modify_user(user, &existing, root_path)?,
-        None => create_user(user, root_path)?,
+    let existing = match unistd::User::from_name(&user.name).ok().flatten() {
+        Some(u) => u,
+        None => {
+            create_user(user, root_path)?;
+            unistd::User::from_name(&user.name)
+                .ok()
+                .flatten()
+                .ok_or(format!("user '{}' not found after creation", user.name))?
+        }
     };
 
+    ensure_home(user, &existing, root_path)?;
+    ensure_shell(user, &existing, root_path)?;
+    ensure_groups(user, root_path)?;
+    ensure_password(user, &existing, root_path)?;
     ensure_authorized_keys(user, root_path)?;
 
     Ok(())
 }
 
 pub fn create_user(user: &User, root: &path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    let mut cmd = process::Command::new("useradd");
-
-    cmd.arg("-U")
+    let status = process::Command::new("useradd")
+        .arg("-U")
         .arg("-u")
         .arg(&user.uid.to_string())
         .arg("-R")
-        .arg(&root.to_string_lossy().to_string());
+        .arg(&root.to_string_lossy().to_string())
+        .arg(&user.name)
+        .status()?;
 
-    set_shell_home_group_args(user, &mut cmd)?;
-
-    cmd.arg(&user.name);
-
-    let _ = cmd.status();
-
-    if let Some(hash) = &user.password {
-        set_passwd(&user.name, &hash, &root)?;
-    };
+    if !status.success() {
+        return Err(format!("useradd failed for '{}'", user.name).into());
+    }
 
     Ok(())
 }
 
-pub fn modify_user(
+fn ensure_home(
     user: &User,
     existing: &unistd::User,
     root: &path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut cmd = process::Command::new("usermod");
-
-    if let Some(_) = &user.groups {
-        cmd.arg("-a");
+    let desired = match &user.home {
+        Some(home) => home,
+        None => return Ok(()),
     };
 
-    set_shell_home_group_args(user, &mut cmd)?;
+    if existing.dir == path::PathBuf::from(desired) {
+        return Ok(());
+    }
 
-    cmd.arg(&user.name);
+    let status = process::Command::new("usermod")
+        .arg("-d")
+        .arg(desired)
+        .arg("-m")
+        .arg("-R")
+        .arg(&root.to_string_lossy().to_string())
+        .arg(&user.name)
+        .status()?;
 
-    let _ = cmd.status();
-
-    if let Some(passwh_hash) = &user.password
-        && *passwh_hash != existing.passwd.to_string_lossy()
-    {
-        set_passwd(&user.name, &passwh_hash, root)?;
-    };
+    if !status.success() {
+        return Err(format!("usermod failed setting home for '{}'", user.name).into());
+    }
 
     Ok(())
 }
 
-fn set_shell_home_group_args(
+fn ensure_shell(
     user: &User,
-    cmd: &mut process::Command,
+    existing: &unistd::User,
+    root: &path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(shell) = &user.shell {
-        cmd.arg("-s").arg(shell);
+    let desired = match &user.shell {
+        Some(shell) => shell,
+        None => return Ok(()),
     };
 
-    if let Some(home_dir) = &user.home {
-        cmd.arg("-m").arg("-d").arg(home_dir);
+    if existing.shell == path::PathBuf::from(desired) {
+        return Ok(());
+    }
+
+    let status = process::Command::new("usermod")
+        .arg("-s")
+        .arg(desired)
+        .arg("-R")
+        .arg(&root.to_string_lossy().to_string())
+        .arg(&user.name)
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("usermod failed setting shell for '{}'", user.name).into());
+    }
+
+    Ok(())
+}
+
+fn ensure_groups(
+    user: &User,
+    root: &path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let desired_groups = match &user.groups {
+        Some(groups) => groups,
+        None => return Ok(()),
     };
 
-    if let Some(groups) = &user.groups {
-        cmd.arg("-G").arg(groups.join(","));
+    for group_name in desired_groups {
+        let group = match unistd::Group::from_name(group_name).ok().flatten() {
+            Some(g) => g,
+            None => continue,
+        };
+
+        if group.mem.contains(&user.name) {
+            continue;
+        }
+
+        let status = process::Command::new("usermod")
+            .arg("-a")
+            .arg("-G")
+            .arg(group_name)
+            .arg("-R")
+            .arg(&root.to_string_lossy().to_string())
+            .arg(&user.name)
+            .status()?;
+
+        if !status.success() {
+            return Err(
+                format!("usermod failed adding '{}' to group '{}'", user.name, group_name).into(),
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn ensure_password(
+    user: &User,
+    existing: &unistd::User,
+    root: &path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let desired = match &user.password {
+        Some(hash) => hash,
+        None => return Ok(()),
     };
+
+    if *desired == existing.passwd.to_string_lossy() {
+        return Ok(());
+    }
+
+    set_passwd(&user.name, desired, root)?;
 
     Ok(())
 }
@@ -204,8 +280,8 @@ pub fn ensure_authorized_keys(
 }
 
 fn set_passwd(
-    name: &String,
-    hash: &String,
+    name: &str,
+    hash: &str,
     root: &path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = process::Command::new("chpasswd");
