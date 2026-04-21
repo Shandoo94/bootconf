@@ -236,7 +236,6 @@ pub fn ensure_authorized_keys(
     fs::create_dir_all(parent)?;
     fs::set_permissions(parent, fs::Permissions::from_mode(SSH_DIR_MODE))?;
 
-    #[cfg(not(test))]
     if user.home.is_some() {
         unistd::chown(
             parent,
@@ -266,7 +265,6 @@ pub fn ensure_authorized_keys(
             fs::Permissions::from_mode(AUTHORIZED_KEYS_MODE),
         )?;
 
-        #[cfg(not(test))]
         if user.home.is_some() {
             unistd::chown(
                 &target_path,

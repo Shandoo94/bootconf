@@ -1,4 +1,5 @@
 use crate::host::{self, HostConfig, apply_hostname, apply_ssh_key, apply_timezone};
+use nix::unistd;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use tempfile::TempDir;
@@ -204,4 +205,18 @@ fn test_timezone_missing_zoneinfo_file() {
             .to_string()
             .contains("Timezone file not found")
     );
+}
+
+#[test]
+fn test_hostname_system_call() {
+    let desired = "bootconf-test-host";
+    apply_hostname(desired, None).unwrap();
+
+    let current = unistd::gethostname()
+        .map(|h| h.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    assert_eq!(current, desired);
+
+    let hostname_path = std::path::Path::new(host::DEFAULT_ROOT).join(host::DEFAULT_HOSTNAME_PATH);
+    assert_eq!(fs::read_to_string(&hostname_path).unwrap(), desired);
 }
