@@ -7,7 +7,7 @@
 - Idempotently configuring the system hostname.
 - Idempotently configuring the system timezone.
 - Idempotently provisioning SSH host keys.
-- Idempotently managing local user accounts, password hashes, and SSH authorized keys. 
+- Idempotently managing local user accounts, password hashes, supplementary group memberships, and SSH authorized keys. When `groups` or `authorized_keys` are specified, the config is the authoritative source of truth: keys and memberships not present in the config are pruned from the system. Omitting these fields leaves existing state untouched.
 
 **Out of Scope:**
 - Mounting or unmounting the configuration partition (handled by an external wrapper script).
@@ -71,6 +71,7 @@ name = "admin"
 uid = 1000
 groups = ["wheel", "docker"]
 shell = "/bin/bash"
+home = "/home/admin"
 password = "$6$rounds=65536$salt$hashedpassword..."
 authorized_keys = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... user@laptop" ]
 
@@ -79,3 +80,17 @@ name = "service_account"
 uid = 1001
 shell = "/sbin/nologin"
 ```
+
+#### Semantics
+
+All fields except `name` and `uid` are optional. Their behavior depends on whether they are specified:
+
+| Field | Specified | Omitted |
+|-------|-----------|---------|
+| `groups` | **Authoritative**: user is added to listed groups and removed from any supplementary group not in the list. An empty list removes all supplementary memberships. | Unmanaged: existing memberships are left untouched. |
+| `authorized_keys` | **Authoritative**: the authorized_keys file is reconciled to contain exactly the listed keys; stale keys are removed. An empty list deletes the file. | Unmanaged: existing keys are left untouched. |
+| `shell` | Set to the specified value if it differs from current. | Unmanaged. |
+| `home` | Set to the specified value if it differs from current. | Unmanaged. |
+| `password` | Set to the specified hash if it differs from current. | Unmanaged. |
+
+The primary group (created by `useradd -U`) is never modified. Users are never deleted — the tool only creates and reconciles accounts declared in the config.

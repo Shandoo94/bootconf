@@ -132,6 +132,8 @@ pub fn ensure_groups(user: &User) -> Result<(), Box<dyn std::error::Error>> {
         None => return Ok(()),
     };
 
+    let desired_set: HashSet<&str> = desired_groups.iter().map(|s| s.as_str()).collect();
+
     for group_name in desired_groups {
         let group = match unistd::Group::from_name(group_name).ok().flatten() {
             Some(g) => g,
@@ -158,7 +160,65 @@ pub fn ensure_groups(user: &User) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    let primary_gid = unistd::User::from_name(&user.name)
+        .ok()
+        .flatten()
+        .map(|u| u.gid);
+
+    let current_groups = get_user_supplementary_groups(&user.name)?;
+
+    for group_name in &current_groups {
+        if desired_set.contains(group_name.as_str()) {
+            continue;
+        }
+
+        let group = match unistd::Group::from_name(group_name).ok().flatten() {
+            Some(g) => g,
+            None => continue,
+        };
+
+        if primary_gid == Some(group.gid) {
+            continue;
+        }
+
+        let status = process::Command::new("gpasswd")
+            .arg("-d")
+            .arg(&user.name)
+            .arg(group_name)
+            .status()?;
+
+        if !status.success() {
+            return Err(format!(
+                "gpasswd failed removing '{}' from group '{}'",
+                user.name, group_name
+            )
+            .into());
+        }
+    }
+
     Ok(())
+}
+
+fn get_user_supplementary_groups(name: &str) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
+    let content = fs::read_to_string("/etc/group")?;
+    let mut groups = HashSet::new();
+
+    for line in content.lines() {
+        let mut parts = line.splitn(4, ':');
+        let group_name = match parts.next() {
+            Some(n) => n,
+            None => continue,
+        };
+        let _ = parts.next();
+        let _ = parts.next();
+        let members = parts.next().unwrap_or("");
+
+        if members.split(',').any(|m| m.trim() == name) {
+            groups.insert(group_name.to_string());
+        }
+    }
+
+    Ok(groups)
 }
 
 pub fn ensure_password(
@@ -212,8 +272,8 @@ pub fn read_key_set(path: &path::Path) -> HashSet<String> {
 
 pub fn ensure_authorized_keys(user: &User) -> Result<(), Box<dyn std::error::Error>> {
     let keys = match &user.authorized_keys {
-        Some(keys) if !keys.is_empty() => keys,
-        _ => return Ok(()),
+        Some(keys) => keys,
+        None => return Ok(()),
     };
 
     let target_path = match &user.home {
@@ -224,6 +284,24 @@ pub fn ensure_authorized_keys(user: &User) -> Result<(), Box<dyn std::error::Err
             .join(AUTHORIZED_KEYS_DIR)
             .join(&user.name),
     };
+
+    let desired_set: HashSet<String> = keys.iter().cloned().collect();
+
+    if desired_set.is_empty() {
+        if target_path.exists() {
+            fs::remove_file(&target_path)?;
+            if user.home.is_some() {
+                let _ = fs::remove_dir(target_path.parent().unwrap());
+            }
+        }
+        return Ok(());
+    }
+
+    let existing_set = read_key_set(&target_path);
+
+    if existing_set == desired_set {
+        return Ok(());
+    }
 
     let parent = target_path.parent().unwrap();
     fs::create_dir_all(parent)?;
@@ -237,34 +315,25 @@ pub fn ensure_authorized_keys(user: &User) -> Result<(), Box<dyn std::error::Err
         )?;
     }
 
-    let existing = read_key_set(&target_path);
-    let new_keys: Vec<&String> = keys.iter().filter(|k| !existing.contains(*k)).collect();
+    let content = keys
+        .iter()
+        .map(|k| k.as_str())
+        .collect::<Vec<&str>>()
+        .join("\n")
+        + "\n";
 
-    if !new_keys.is_empty() {
-        let mut content: String = fs::read_to_string(&target_path).unwrap_or_default();
+    fs::write(&target_path, &content)?;
+    fs::set_permissions(
+        &target_path,
+        fs::Permissions::from_mode(AUTHORIZED_KEYS_MODE),
+    )?;
 
-        if !content.is_empty() && !content.ends_with('\n') {
-            content.push('\n');
-        }
-
-        for key in &new_keys {
-            content.push_str(key);
-            content.push('\n');
-        }
-
-        fs::write(&target_path, &content)?;
-        fs::set_permissions(
+    if user.home.is_some() {
+        unistd::chown(
             &target_path,
-            fs::Permissions::from_mode(AUTHORIZED_KEYS_MODE),
+            Some(unistd::Uid::from_raw(user.uid)),
+            Some(unistd::Gid::from_raw(user.uid)),
         )?;
-
-        if user.home.is_some() {
-            unistd::chown(
-                &target_path,
-                Some(unistd::Uid::from_raw(user.uid)),
-                Some(unistd::Gid::from_raw(user.uid)),
-            )?;
-        }
     }
 
     Ok(())

@@ -470,6 +470,113 @@ fn test_ensure_groups_nonexistent_group_skipped() {
 }
 
 #[test]
+fn test_ensure_groups_removes_stale_membership() {
+    let status = process::Command::new("groupadd")
+        .arg("bootconf-stale-group")
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let status = process::Command::new("groupadd")
+        .arg("bootconf-keep-group")
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let user = User {
+        name: "bootconf-stale-user".to_string(),
+        uid: 9911,
+        groups: Some(vec![
+            "bootconf-stale-group".to_string(),
+            "bootconf-keep-group".to_string(),
+        ]),
+        shell: None,
+        home: None,
+        password: None,
+        authorized_keys: None,
+    };
+    users::create_user(&user).unwrap();
+    ensure_groups(&user).unwrap();
+
+    let stale_group = nix::unistd::Group::from_name("bootconf-stale-group")
+        .ok()
+        .flatten()
+        .unwrap();
+    let keep_group = nix::unistd::Group::from_name("bootconf-keep-group")
+        .ok()
+        .flatten()
+        .unwrap();
+    assert!(stale_group.mem.contains(&"bootconf-stale-user".to_string()));
+    assert!(keep_group.mem.contains(&"bootconf-stale-user".to_string()));
+
+    let user_updated = User {
+        name: "bootconf-stale-user".to_string(),
+        uid: 9911,
+        groups: Some(vec!["bootconf-keep-group".to_string()]),
+        shell: None,
+        home: None,
+        password: None,
+        authorized_keys: None,
+    };
+    ensure_groups(&user_updated).unwrap();
+
+    let stale_group_after = nix::unistd::Group::from_name("bootconf-stale-group")
+        .ok()
+        .flatten()
+        .unwrap();
+    let keep_group_after = nix::unistd::Group::from_name("bootconf-keep-group")
+        .ok()
+        .flatten()
+        .unwrap();
+    assert!(!stale_group_after.mem.contains(&"bootconf-stale-user".to_string()));
+    assert!(keep_group_after.mem.contains(&"bootconf-stale-user".to_string()));
+}
+
+#[test]
+fn test_ensure_groups_empty_vec_removes_all() {
+    let status = process::Command::new("groupadd")
+        .arg("bootconf-rmall-group")
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let user = User {
+        name: "bootconf-rmall-user".to_string(),
+        uid: 9931,
+        groups: Some(vec!["bootconf-rmall-group".to_string()]),
+        shell: None,
+        home: None,
+        password: None,
+        authorized_keys: None,
+    };
+    users::create_user(&user).unwrap();
+    ensure_groups(&user).unwrap();
+
+    let group = nix::unistd::Group::from_name("bootconf-rmall-group")
+        .ok()
+        .flatten()
+        .unwrap();
+    assert!(group.mem.contains(&"bootconf-rmall-user".to_string()));
+
+    let user_no_groups = User {
+        name: "bootconf-rmall-user".to_string(),
+        uid: 9931,
+        groups: Some(vec![]),
+        shell: None,
+        home: None,
+        password: None,
+        authorized_keys: None,
+    };
+    ensure_groups(&user_no_groups).unwrap();
+
+    let group_after = nix::unistd::Group::from_name("bootconf-rmall-group")
+        .ok()
+        .flatten()
+        .unwrap();
+    assert!(!group_after.mem.contains(&"bootconf-rmall-user".to_string()));
+}
+
+#[test]
 fn test_authorized_keys_home_dir() {
     let user = User {
         name: "bootconf-ak-home".to_string(),
@@ -684,38 +791,108 @@ fn test_authorized_keys_empty_vec() {
 }
 
 #[test]
-fn test_authorized_keys_no_trailing_newline() {
+fn test_authorized_keys_empty_vec_deletes_existing_file() {
     let user = User {
-        name: "bootconf-ak-newline".to_string(),
-        uid: 9928,
+        name: "bootconf-ak-del".to_string(),
+        uid: 9929,
         groups: None,
         shell: None,
-        home: Some("/home/bootconf-ak-newline".to_string()),
+        home: Some("/home/bootconf-ak-del".to_string()),
         password: None,
-        authorized_keys: None,
+        authorized_keys: Some(vec!["ssh-ed25519 KEY1 host".to_string()]),
     };
     users::create_user(&user).unwrap();
+    users::ensure_authorized_keys(&user).unwrap();
 
-    let ssh_dir = std::path::PathBuf::from("/home/bootconf-ak-newline").join(SSH_DIR);
-    fs::create_dir_all(&ssh_dir).unwrap();
-    let key_path = ssh_dir.join(AUTHORIZED_KEYS);
-    fs::write(&key_path, "ssh-ed25519 EXISTING host").unwrap();
+    let key_path = std::path::PathBuf::from("/home/bootconf-ak-del")
+        .join(SSH_DIR)
+        .join(AUTHORIZED_KEYS);
+    assert!(key_path.exists());
 
-    let user_with_key = User {
-        name: "bootconf-ak-newline".to_string(),
+    let user_no_keys = User {
+        name: "bootconf-ak-del".to_string(),
+        uid: 9929,
+        groups: None,
+        shell: None,
+        home: Some("/home/bootconf-ak-del".to_string()),
+        password: None,
+        authorized_keys: Some(vec![]),
+    };
+    users::ensure_authorized_keys(&user_no_keys).unwrap();
+    assert!(!key_path.exists());
+}
+
+#[test]
+fn test_authorized_keys_fallback_prunes_stale_key() {
+    let user = User {
+        name: "bootconf-ak-fprune".to_string(),
+        uid: 9930,
+        groups: None,
+        shell: None,
+        home: None,
+        password: None,
+        authorized_keys: Some(vec![
+            "ssh-ed25519 KEY1 host".to_string(),
+            "ssh-ed25519 KEY2 host".to_string(),
+        ]),
+    };
+    users::create_user(&user).unwrap();
+    users::ensure_authorized_keys(&user).unwrap();
+
+    let key_path = std::path::Path::new("/")
+        .join(AUTHORIZED_KEYS_DIR)
+        .join("bootconf-ak-fprune");
+
+    let user_pruned = User {
+        name: "bootconf-ak-fprune".to_string(),
+        uid: 9930,
+        groups: None,
+        shell: None,
+        home: None,
+        password: None,
+        authorized_keys: Some(vec!["ssh-ed25519 KEY1 host".to_string()]),
+    };
+    users::ensure_authorized_keys(&user_pruned).unwrap();
+
+    let content = fs::read_to_string(&key_path).unwrap();
+    assert!(content.contains("ssh-ed25519 KEY1 host"));
+    assert!(!content.contains("ssh-ed25519 KEY2 host"));
+}
+
+#[test]
+fn test_authorized_keys_prunes_stale_key() {
+    let user = User {
+        name: "bootconf-ak-prune".to_string(),
         uid: 9928,
         groups: None,
         shell: None,
-        home: Some("/home/bootconf-ak-newline".to_string()),
+        home: Some("/home/bootconf-ak-prune".to_string()),
         password: None,
-        authorized_keys: Some(vec!["ssh-ed25519 NEWKEY host".to_string()]),
+        authorized_keys: Some(vec![
+            "ssh-ed25519 KEY1 host".to_string(),
+            "ssh-ed25519 KEY2 host".to_string(),
+        ]),
     };
-    users::ensure_authorized_keys(&user_with_key).unwrap();
+    users::create_user(&user).unwrap();
+    users::ensure_authorized_keys(&user).unwrap();
 
+    let user_pruned = User {
+        name: "bootconf-ak-prune".to_string(),
+        uid: 9928,
+        groups: None,
+        shell: None,
+        home: Some("/home/bootconf-ak-prune".to_string()),
+        password: None,
+        authorized_keys: Some(vec!["ssh-ed25519 KEY1 host".to_string()]),
+    };
+    users::ensure_authorized_keys(&user_pruned).unwrap();
+
+    let key_path = std::path::PathBuf::from("/home/bootconf-ak-prune")
+        .join(SSH_DIR)
+        .join(AUTHORIZED_KEYS);
     let content = fs::read_to_string(&key_path).unwrap();
-    assert!(content.contains("ssh-ed25519 EXISTING host\n"));
-    assert!(content.contains("ssh-ed25519 NEWKEY host"));
-    assert_eq!(content.matches("ssh-ed25519 NEWKEY host").count(), 1);
+    assert!(content.contains("ssh-ed25519 KEY1 host"));
+    assert!(!content.contains("ssh-ed25519 KEY2 host"));
 }
 
 #[test]
