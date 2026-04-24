@@ -12,6 +12,8 @@ pub const AUTHORIZED_KEYS: &str = "authorized_keys";
 pub const AUTHORIZED_KEYS_DIR: &str = "etc/ssh/authorized_keys.d";
 pub const SSH_DIR_MODE: u32 = 0o700;
 pub const AUTHORIZED_KEYS_MODE: u32 = 0o600;
+pub const ETC_GROUP_PATH: &str = "/etc/group";
+pub const ETC_SHADOW_PATH: &str = "/etc/shadow";
 
 #[derive(Deserialize, Debug)]
 pub struct UsersConfig {
@@ -71,6 +73,16 @@ pub fn create_user(user: &User) -> Result<(), Box<dyn std::error::Error>> {
 
     if !status.success() {
         return Err(format!("useradd failed for '{}'", user.name).into());
+    }
+
+    Ok(())
+}
+
+pub fn create_group(name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let status = process::Command::new("groupadd").arg(name).status()?;
+
+    if !status.success() {
+        return Err(format!("groupadd failed for '{}'", name).into());
     }
 
     Ok(())
@@ -137,7 +149,13 @@ pub fn ensure_groups(user: &User) -> Result<(), Box<dyn std::error::Error>> {
     for group_name in desired_groups {
         let group = match unistd::Group::from_name(group_name).ok().flatten() {
             Some(g) => g,
-            None => continue,
+            None => {
+                create_group(group_name)?;
+                unistd::Group::from_name(group_name)
+                    .ok()
+                    .flatten()
+                    .ok_or(format!("group '{}' not found after creation", group_name))?
+            }
         };
 
         if group.mem.contains(&user.name) {
@@ -199,8 +217,10 @@ pub fn ensure_groups(user: &User) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn get_user_supplementary_groups(name: &str) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
-    let content = fs::read_to_string("/etc/group")?;
+fn get_user_supplementary_groups(
+    name: &str,
+) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
+    let content = fs::read_to_string(ETC_GROUP_PATH)?;
     let mut groups = HashSet::new();
 
     for line in content.lines() {
@@ -248,7 +268,7 @@ pub fn ensure_password(
 }
 
 fn read_shadow_hash(name: &str) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    let content = fs::read_to_string("/etc/shadow")?;
+    let content = fs::read_to_string(ETC_SHADOW_PATH)?;
     for line in content.lines() {
         let mut parts = line.splitn(3, ':');
         if parts.next() == Some(name) {
@@ -290,9 +310,6 @@ pub fn ensure_authorized_keys(user: &User) -> Result<(), Box<dyn std::error::Err
     if desired_set.is_empty() {
         if target_path.exists() {
             fs::remove_file(&target_path)?;
-            if user.home.is_some() {
-                let _ = fs::remove_dir(target_path.parent().unwrap());
-            }
         }
         return Ok(());
     }
@@ -349,7 +366,10 @@ pub fn set_passwd(name: &str, hash: &str) -> Result<(), Box<dyn std::error::Erro
     write!(stdin, "{}:{}", name, hash)?;
     drop(stdin);
 
-    child.wait()?;
+    let status = child.wait()?;
+    if !status.success() {
+        return Err(format!("chpasswd failed for '{}'", name).into());
+    }
 
     Ok(())
 }

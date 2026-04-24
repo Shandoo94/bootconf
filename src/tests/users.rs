@@ -1,6 +1,7 @@
 use crate::users::{
     self, AUTHORIZED_KEYS, AUTHORIZED_KEYS_DIR, AUTHORIZED_KEYS_MODE, SSH_DIR, SSH_DIR_MODE, User,
-    UsersConfig, ensure_groups, ensure_home, ensure_password, ensure_shell, read_key_set,
+    UsersConfig, create_group, ensure_groups, ensure_home, ensure_password, ensure_shell,
+    read_key_set,
 };
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -143,6 +144,23 @@ fn test_create_user_duplicate() {
     let user = make_user("bootconf-dup-user", 9901, None, None);
     users::create_user(&user).unwrap();
     assert!(users::create_user(&user).is_err());
+}
+
+#[test]
+fn test_create_group() {
+    create_group("bootconf-test-create-grp").unwrap();
+
+    let group = nix::unistd::Group::from_name("bootconf-test-create-grp")
+        .ok()
+        .flatten()
+        .unwrap();
+    assert_eq!(group.name, "bootconf-test-create-grp");
+}
+
+#[test]
+fn test_create_group_duplicate() {
+    create_group("bootconf-dup-grp").unwrap();
+    assert!(create_group("bootconf-dup-grp").is_err());
 }
 
 #[test]
@@ -455,11 +473,11 @@ fn test_ensure_groups_no_groups_specified() {
 }
 
 #[test]
-fn test_ensure_groups_nonexistent_group_skipped() {
+fn test_ensure_groups_creates_nonexistent_group() {
     let user = User {
-        name: "bootconf-nogrp-user".to_string(),
+        name: "bootconf-creategrp-user".to_string(),
         uid: 9910,
-        groups: Some(vec!["nonexistent-group-xyz".to_string()]),
+        groups: Some(vec!["bootconf-auto-group-xyz".to_string()]),
         shell: None,
         home: None,
         password: None,
@@ -467,6 +485,12 @@ fn test_ensure_groups_nonexistent_group_skipped() {
     };
     users::create_user(&user).unwrap();
     ensure_groups(&user).unwrap();
+
+    let group = nix::unistd::Group::from_name("bootconf-auto-group-xyz")
+        .ok()
+        .flatten()
+        .unwrap();
+    assert!(group.mem.contains(&"bootconf-creategrp-user".to_string()));
 }
 
 #[test]
@@ -528,8 +552,16 @@ fn test_ensure_groups_removes_stale_membership() {
         .ok()
         .flatten()
         .unwrap();
-    assert!(!stale_group_after.mem.contains(&"bootconf-stale-user".to_string()));
-    assert!(keep_group_after.mem.contains(&"bootconf-stale-user".to_string()));
+    assert!(
+        !stale_group_after
+            .mem
+            .contains(&"bootconf-stale-user".to_string())
+    );
+    assert!(
+        keep_group_after
+            .mem
+            .contains(&"bootconf-stale-user".to_string())
+    );
 }
 
 #[test]
