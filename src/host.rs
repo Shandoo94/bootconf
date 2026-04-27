@@ -1,4 +1,3 @@
-#[cfg(not(test))]
 use nix::unistd;
 
 use serde::Deserialize;
@@ -76,15 +75,12 @@ pub fn apply_hostname(
     hostname: &str,
     root: Option<&path::Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(not(test))]
-    {
-        let current = unistd::gethostname()
-            .map(|h| h.to_string_lossy().into_owned())
-            .unwrap_or_default();
+    let current = unistd::gethostname()
+        .map(|h| h.to_string_lossy().into_owned())
+        .unwrap_or_default();
 
-        if current != hostname {
-            unistd::sethostname(hostname)?;
-        }
+    if current != hostname {
+        unistd::sethostname(hostname)?;
     }
 
     let hostname_path = root

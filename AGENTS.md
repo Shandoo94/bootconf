@@ -4,34 +4,27 @@ This file provides guidelines for agentic coding agents operating in this reposi
 
 ## Build, Lint, and Test Commands
 
+Tests make destructive changes to the root filesystem and require root + `CAP_SYS_ADMIN`. All commands run via the Makefile inside an ephemeral podman container.
+
 ```bash
-# Build the project
-cargo build
+make test
+make build
+make check
+make fmt
+make clippy
+```
 
-# Build in release mode
-cargo build --release
+To run a single test by name:
 
-# Run all tests
-cargo test
+```bash
+make test test_parse_valid_config
+```
 
-# Run a single test by name
-cargo test test_parse_valid_config
-cargo test test_ssh_key_idempotency
+Other cargo commands can be run ad-hoc:
 
-# Type check without building
-cargo check
-
-# Format code
-cargo fmt
-
-# Run clippy (if configured)
-cargo clippy
-
-# Run clippy with auto-fix suggestions
-cargo clippy --fix --allow-dirty
-
-# View documentation
+```bash
 cargo doc --open
+cargo clippy --fix --allow-dirty
 ```
 
 ## Code Style Guidelines
@@ -97,9 +90,10 @@ All operations must be idempotent:
 - Don't change hostname if it's already set correctly
 - This is tested explicitly in `test_ssh_key_idempotency`
 
-### Conditional Compilation
-- Use `#[cfg(test)]` to exclude test-only code from production
-- Use `#[cfg(not(test))]` to exclude code that shouldn't run during tests (e.g., `unistd::sethostname`)
+### Containerized Testing
+- Tests run inside an ephemeral podman container (`make test`)
+- The container runs as root with `--cap-add SYS_ADMIN` so privileged syscalls (sethostname, chown) work without conditional compilation
+- Do not add `#[cfg(not(test))]` guards for privileged operations — the container handles isolation
 
 ### CLI Design
 - Uses clap derive macros for subcommand parsing
