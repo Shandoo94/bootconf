@@ -1,3 +1,5 @@
+use log::{debug, info};
+
 use nix::unistd;
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -64,6 +66,8 @@ pub fn apply_user(user: &User) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub fn create_user(user: &User) -> Result<(), Box<dyn std::error::Error>> {
+    info!("creating user '{}' with uid {}", user.name, user.uid);
+
     let status = process::Command::new("useradd")
         .arg("-U")
         .arg("-u")
@@ -79,6 +83,8 @@ pub fn create_user(user: &User) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub fn create_group(name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    info!("creating group '{name}'");
+
     let status = process::Command::new("groupadd").arg(name).status()?;
 
     if !status.success() {
@@ -95,8 +101,11 @@ pub fn ensure_home(user: &User, existing: &unistd::User) -> Result<(), Box<dyn s
     };
 
     if existing.dir == path::PathBuf::from(desired) {
+        debug!("home for '{}' already correct", user.name);
         return Ok(());
     }
+
+    info!("changing home for '{}' to '{desired}'", user.name);
 
     let status = process::Command::new("usermod")
         .arg("-d")
@@ -122,8 +131,11 @@ pub fn ensure_shell(
     };
 
     if existing.shell == path::PathBuf::from(desired) {
+        debug!("shell for '{}' already correct", user.name);
         return Ok(());
     }
+
+    info!("changing shell for '{}' to '{desired}'", user.name);
 
     let status = process::Command::new("usermod")
         .arg("-s")
@@ -159,8 +171,11 @@ pub fn ensure_groups(user: &User) -> Result<(), Box<dyn std::error::Error>> {
         };
 
         if group.mem.contains(&user.name) {
+            debug!("user '{}' already in group '{group_name}'", user.name);
             continue;
         }
+
+        info!("adding '{}' to group '{group_name}'", user.name);
 
         let status = process::Command::new("usermod")
             .arg("-a")
@@ -198,6 +213,8 @@ pub fn ensure_groups(user: &User) -> Result<(), Box<dyn std::error::Error>> {
         if primary_gid == Some(group.gid) {
             continue;
         }
+
+        info!("removing '{}' from group '{group_name}'", user.name);
 
         let status = process::Command::new("gpasswd")
             .arg("-d")
@@ -251,17 +268,20 @@ pub fn ensure_password(
     };
 
     if *desired == existing.passwd.to_string_lossy() {
+        debug!("password for '{}' already matches", user.name);
         return Ok(());
     }
 
     if existing.passwd.to_string_lossy() == "x" {
         if let Some(current_hash) = read_shadow_hash(&user.name)? {
             if *desired == current_hash {
+                debug!("password for '{}' already matches", user.name);
                 return Ok(());
             }
         }
     }
 
+    info!("setting password for '{}'", user.name);
     set_passwd(&user.name, desired)?;
 
     Ok(())
@@ -309,6 +329,7 @@ pub fn ensure_authorized_keys(user: &User) -> Result<(), Box<dyn std::error::Err
 
     if desired_set.is_empty() {
         if target_path.exists() {
+            info!("removing authorized keys file for '{}'", user.name);
             fs::remove_file(&target_path)?;
         }
         return Ok(());
@@ -317,8 +338,11 @@ pub fn ensure_authorized_keys(user: &User) -> Result<(), Box<dyn std::error::Err
     let existing_set = read_key_set(&target_path);
 
     if existing_set == desired_set {
+        debug!("authorized keys for '{}' already correct", user.name);
         return Ok(());
     }
+
+    info!("updating authorized keys for '{}'", user.name);
 
     let parent = target_path.parent().unwrap();
     fs::create_dir_all(parent)?;

@@ -1,5 +1,6 @@
 use bootconf::{host, users};
 use clap::{Parser, Subcommand};
+use log::LevelFilter;
 use std::path;
 
 #[derive(Parser)]
@@ -33,7 +34,14 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
 
-    // get command
+    let level = match cli.verbose {
+        0 => LevelFilter::Warn,
+        1 => LevelFilter::Info,
+        2 => LevelFilter::Debug,
+        _ => LevelFilter::Trace,
+    };
+    env_logger::Builder::new().filter_level(level).init();
+
     let command = if let Some(command) = cli.command {
         command
     } else {
