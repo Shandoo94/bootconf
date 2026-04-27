@@ -50,7 +50,7 @@ fn main() {
 
     match command {
         Commands::Host { file } => {
-            if let Err(e) = host::apply_host_config(&file, None) {
+            if let Err(e) = host::apply_host_config(&file) {
                 eprintln!("Error applying host config: {}", e);
                 std::process::exit(1);
             }

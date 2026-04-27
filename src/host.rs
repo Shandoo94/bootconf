@@ -6,10 +6,9 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path;
 
-pub const DEFAULT_ROOT: &str = "/";
-pub const DEFAULT_HOSTNAME_PATH: &str = "etc/hostname";
-pub const DEFAULT_SSH_DIR: &str = "etc/ssh";
-pub const DEFAULT_TIMEZONE_PATH: &str = "etc/localtime";
+pub const DEFAULT_HOSTNAME_PATH: &str = "/etc/hostname";
+pub const DEFAULT_SSH_DIR: &str = "/etc/ssh";
+pub const DEFAULT_TIMEZONE_PATH: &str = "/etc/localtime";
 pub const DEFAULT_ZONEINFO_DIR: &str = "/usr/share/zoneinfo";
 pub const SSH_KEY_ED25519: &str = "ssh_host_ed25519_key";
 pub const SSH_KEY_ED25519_PUB: &str = "ssh_host_ed25519_key.pub";
@@ -46,26 +45,25 @@ pub struct SshKeyPair {
 
 pub fn apply_host_config(
     file: &path::PathBuf,
-    root: Option<&path::Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let content = fs::read_to_string(file)?;
     let config: HostConfig = toml::from_str(&content)?;
 
-    apply_hostname(&config.hostname, root)?;
+    apply_hostname(&config.hostname)?;
 
     if let Some(locale) = config.locale {
-        apply_timezone(&locale.timezone, root)?;
+        apply_timezone(&locale.timezone)?;
     }
 
     if let Some(ssh_keys) = config.ssh_keys {
         if let Some(ed25519) = ssh_keys.ed25519 {
-            apply_ssh_key(&ed25519.public, &ed25519.private, "ed25519", root)?;
+            apply_ssh_key(&ed25519.public, &ed25519.private, "ed25519")?;
         }
         if let Some(rsa) = ssh_keys.rsa {
-            apply_ssh_key(&rsa.public, &rsa.private, "rsa", root)?;
+            apply_ssh_key(&rsa.public, &rsa.private, "rsa")?;
         }
         if let Some(ecdsa) = ssh_keys.ecdsa {
-            apply_ssh_key(&ecdsa.public, &ecdsa.private, "ecdsa", root)?;
+            apply_ssh_key(&ecdsa.public, &ecdsa.private, "ecdsa")?;
         }
     }
 
@@ -74,7 +72,6 @@ pub fn apply_host_config(
 
 pub fn apply_hostname(
     hostname: &str,
-    root: Option<&path::Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let current = unistd::gethostname()
         .map(|h| h.to_string_lossy().into_owned())
@@ -87,9 +84,7 @@ pub fn apply_hostname(
         debug!("hostname already set to '{hostname}'");
     }
 
-    let hostname_path = root
-        .unwrap_or(path::Path::new(DEFAULT_ROOT))
-        .join(path::Path::new(DEFAULT_HOSTNAME_PATH));
+    let hostname_path = path::PathBuf::from(DEFAULT_HOSTNAME_PATH);
     if let Some(parent) = hostname_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -100,7 +95,6 @@ pub fn apply_hostname(
 
 pub fn apply_timezone(
     zone: &str,
-    root: Option<&path::Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let zoneinfo_file = format!("{}/{}", DEFAULT_ZONEINFO_DIR, zone);
     if !path::Path::new(&zoneinfo_file).exists() {
@@ -111,9 +105,7 @@ pub fn apply_timezone(
         .into());
     }
 
-    let localtime_path = root
-        .unwrap_or(path::Path::new(DEFAULT_ROOT))
-        .join(path::Path::new(DEFAULT_TIMEZONE_PATH));
+    let localtime_path = path::PathBuf::from(DEFAULT_TIMEZONE_PATH);
 
     if let Some(parent) = localtime_path.parent() {
         fs::create_dir_all(parent)?;
@@ -137,7 +129,6 @@ pub fn apply_timezone(
             fs::remove_file(&localtime_path)?;
         }
 
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&zoneinfo_file, &localtime_path)?;
     } else {
         debug!("timezone already set to '{zone}'");
@@ -150,11 +141,8 @@ pub fn apply_ssh_key(
     public: &str,
     private: &str,
     key_type: &str,
-    root: Option<&path::Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let ssh_dir = root
-        .unwrap_or(path::Path::new(DEFAULT_ROOT))
-        .join(path::Path::new(DEFAULT_SSH_DIR));
+    let ssh_dir = path::PathBuf::from(DEFAULT_SSH_DIR);
 
     fs::create_dir_all(&ssh_dir)?;
 
