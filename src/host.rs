@@ -1,5 +1,6 @@
-use nix::unistd;
+use log::{debug, info};
 
+use nix::unistd;
 use serde::Deserialize;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -80,7 +81,10 @@ pub fn apply_hostname(
         .unwrap_or_default();
 
     if current != hostname {
+        info!("setting hostname from '{current}' to '{hostname}'");
         unistd::sethostname(hostname)?;
+    } else {
+        debug!("hostname already set to '{hostname}'");
     }
 
     let hostname_path = root
@@ -115,32 +119,28 @@ pub fn apply_timezone(
         fs::create_dir_all(parent)?;
     }
 
-    // Idempotency check
     let needs_update = if localtime_path.exists() {
         match fs::read_link(&localtime_path) {
             Ok(current_target) => {
                 let current_target_str = current_target.to_string_lossy();
                 current_target_str != zoneinfo_file
             }
-            Err(_) => {
-                // Not a symlink, needs update
-                true
-            }
+            Err(_) => true,
         }
     } else {
-        // Doesn't exist, needs creation
         true
     };
 
     if needs_update {
-        // Remove existing file/symlink if present
+        info!("updating timezone symlink to '{zone}'");
         if localtime_path.exists() {
             fs::remove_file(&localtime_path)?;
         }
 
-        // Create the symlink
         #[cfg(unix)]
         std::os::unix::fs::symlink(&zoneinfo_file, &localtime_path)?;
+    } else {
+        debug!("timezone already set to '{zone}'");
     }
 
     Ok(())
@@ -169,14 +169,20 @@ pub fn apply_ssh_key(
     let priv_path = ssh_dir.join(path::Path::new(priv_filename));
 
     if !pub_path.exists() {
+        info!("writing {key_type} SSH host public key");
         fs::write(&pub_path, public)?;
+    } else {
+        debug!("{key_type} SSH host public key already exists, skipping");
     }
 
     if !priv_path.exists() {
+        info!("writing {key_type} SSH host private key");
         fs::write(&priv_path, private)?;
         let mut perms = fs::metadata(&priv_path)?.permissions();
         perms.set_mode(0o600);
         fs::set_permissions(&priv_path, perms)?;
+    } else {
+        debug!("{key_type} SSH host private key already exists, skipping");
     }
 
     Ok(())
